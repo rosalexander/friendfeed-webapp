@@ -16,9 +16,10 @@ Config MySQL for local MySQL db
 
 app.config['UPLOAD_FOLDER'] = os.path.dirname(os.path.abspath(__file__)) + '/upload'
 
+#This token is for authenticating to MySQL Storage. It most likely needs to be refreshed
 auth_token_header = {'X-Auth-Token': 'AUTH_tk5ed7e7e3b78bcff82f96f49c184fbe0d'}
 
-
+#Connect the Flask app to MySQL Cloud
 def connect():
 	connectString = os.environ.get('MYSQLCS_CONNECT_STRING', 'localhost:3306/myflaskapp') 
 	hostname = connectString[:connectString.index(":")]
@@ -26,13 +27,15 @@ def connect():
 	mysql = pymysql.connect(host=hostname, port=int(os.environ.get('MYSQLCS_MYSQL_PORT', '3306')), user=os.environ.get('MYSQLCS_USER_NAME', 'root'), passwd=os.environ .get('MYSQLCS_USER_PASSWORD', 'password'), db=database,cursorclass=pymysql.cursors.DictCursor)
 	return mysql
 
+#Tokens for MySQL Storage expire and need to be refreshed. This will get a new one
 def refresh_token():
 	r = requests.head('https://uscom-east-1.storage.oraclecloud.com/v1/Storage-gse00015183', headers = auth_token_header)
 	if (r.ok == False):
-		header = {'X-Storage-User': 'Storage-gse00015183:cloud.admin', 'X-Storage-Pass': 'Acyclic@3BaBy'}
+		header = {'X-Storage-User': 'login', 'X-Storage-Pass': 'password'}
 		r = requests.get('https://uscom-east-1.storage.oraclecloud.com/auth/v1.0', headers=header)
 		auth_token_header['X-Auth-Token'] = r.headers['X-Auth-Token']
 
+#Create the tables for users, articles, and images. The homepage needs the database to be set up before it can function
 @app.route('/setupdb')
 def setupDB():
 	mysql = connect()
@@ -61,6 +64,7 @@ def setupDB():
 	flash('The tables were created succesfully', 'success')
 	return redirect(url_for('index'))
 
+#Deletes the tables for users, articles, and images.
 @app.route('/resetdb')
 def resetDB():
 	mysql = connect()
@@ -75,7 +79,7 @@ def resetDB():
 	flash('The database has been reset', 'danger')
 	return redirect(url_for('index'))
 
-
+#The homepage will find all articles in the db and present them in descending order of creation
 @app.route('/')
 def index():
 	mysql = connect()
@@ -89,10 +93,13 @@ def index():
 
 	return render_template('home.html', msg=msg)
 
+#Takes you to a form to upload a file and send it to the uploader route
 @app.route('/upload')
 def upload_file():
    return render_template('upload.html')
-	
+
+#CAN ONLY TAKE IN JPG IMAGES <- Need to fix
+#Takes a picture and uploads it into Oracle Cloud Storage. Adds a new entry in the images table.
 @app.route('/uploader', methods = ['GET', 'POST'])
 def uploader_file():
 	if request.method == 'POST':
@@ -117,8 +124,9 @@ def uploader_file():
 		else:
 			flash('Upload unsuccessful: ' + r.text, 'danger')
 			refresh_token()
-		return redirect(url_for('dashboard'))
+		return redirect(url_for('profile'))
 
+#Downloads an image from Oracle Cloud Storage
 @app.route('/get_img/<string:ref>')
 def get_img(ref):
 	print(ref)
@@ -130,6 +138,7 @@ def get_img(ref):
 		img = Response(r.content, mimetype="image/jpg")
 		return img
 
+#Displays images that exist in the images table.
 @app.route('/images')
 def images():
 	mysql = connect()
@@ -146,29 +155,17 @@ def images():
 def about():
 	return render_template('about.html')
 
-@app.route('/articles')
-def articles():
-	mysql = connect()
-	cur = mysql.cursor()
-	result = cur.execute("SELECT * FROM articles")
-	articles = cur.fetchall()
-	if result > 0:
-		return render_template('articles.html', articles=articles)
-	else:
-		msg = 'No Articles found'
-		return render_template('articles.html', msg=msg)
-	mysql.close()
-
-
-@app.route('/articles/<string:id>/')
+#Displays a post in its own separate page
+@app.route('/post/<string:id>/')
 def article(id):
 	mysql = connect()
 	cur = mysql.cursor()
 	result = cur.execute("SELECT * FROM articles WHERE id = %s", [id])
 	article = cur.fetchone()
 	mysql.close()
-	return render_template('article.html', article = article)
+	return render_template('post.html', article = article)
 
+#Form used for registering users
 class RegisterForm(Form):
 	name = StringField('Name', [validators.Length(min=1, max=50)])
 	username = StringField('Username', [validators.Length(min=4, max=25)])
@@ -178,6 +175,7 @@ class RegisterForm(Form):
 		])
 	confirm = PasswordField('Confirm Password')
 
+#Registers users and saves entry in users table
 @app.route('/register', methods=['GET', 'POST'])
 def register():
 	form = RegisterForm(request.form)
@@ -199,6 +197,7 @@ def register():
 
 	return render_template('register.html', form=form)
 
+#Checks login details with entry in users table and validates login and creates a new session
 @app.route('/login', methods=['GET', 'POST'])
 def login():
 	if request.method == 'POST':
@@ -222,7 +221,7 @@ def login():
 				session['username'] = username
 
 				flash('You are now logged in', 'success')
-				return redirect(url_for('dashboard'))
+				return redirect(url_for('profile'))
 
 			else:
 				error = 'Invalid password'
@@ -237,6 +236,7 @@ def login():
 
 	return render_template('login.html')
 
+#Checks to see if a user is logged in
 def is_logged_in(f):
 	@wraps(f)
 	def wrap(*args, **kwargs):
@@ -247,33 +247,36 @@ def is_logged_in(f):
 			return redirect(url_for('login'))
 	return wrap
 
-
+#Logs a user out and clears the session
 @app.route('/logout')
 def logout():
 	session.clear()
 	flash('You are now logged out', 'success')
 	return redirect(url_for('login'))
 
-@app.route('/dashboard')
+#Takes user to their profile page where they can make a new post or upload an image
+@app.route('/profile')
 @is_logged_in
-def dashboard():
+def profile():
 	mysql = connect()
 	cur = mysql.cursor()
 	result = cur.execute("SELECT * FROM articles WHERE author=%s", [session['username']])
 	articles = cur.fetchall()
 	if result > 0:
-		return render_template('dashboard.html', articles=articles)
+		return render_template('profile.html', articles=articles)
 	else:
 		msg = 'No posts found!'
-		return render_template('dashboard.html', msg=msg)
+		return render_template('profile.html', msg=msg)
 
 	cur.close()
 	mysql.close()
 
+#Form used to create a new text post
 class ArticleForm(Form):
 	title = StringField('Title', [validators.Length(min=1, max=200)])
 	body = TextAreaField('Body', [validators.Length(min=30,)])
 
+#Page that creates a new post and adds it to the articles table
 @app.route('/add_article', methods=['GET', 'POST'])
 @is_logged_in
 def add_article():
@@ -291,10 +294,11 @@ def add_article():
 		mysql.close()
 
 		flash('Article created', 'success')
-		return redirect(url_for('dashboard'))
+		return redirect(url_for('profile'))
 
 	return render_template('/add_article.html', form=form)
 
+#Page that gets an existing post in the articles table and updates it
 @app.route('/edit_article/<string:id>', methods=['GET', 'POST'])
 @is_logged_in
 def edit_article(id):
@@ -321,13 +325,14 @@ def edit_article(id):
 		mysql.close()
 		
 		flash('Article saved', 'success')
-		return redirect(url_for('dashboard'))
+		return redirect(url_for('profile'))
 
 	cur.close()
 	mysql.close()
 
 	return render_template('/edit_article.html', form=form)
 
+#Gets an existing article from the articles table and deletes it
 @app.route('/delete_article/<string:id>', methods=['POST'])
 @is_logged_in
 def delete_article(id):
@@ -338,9 +343,9 @@ def delete_article(id):
 	cur.close()
 	mysql.close()
 	flash('Article deleted', 'success')
-	return redirect(url_for('dashboard'))
+	return redirect(url_for('profile'))
 
 if __name__ == '__main__':
-	app.secret_key='secret123'
+	app.secret_key='secret'
 	app.run(host='0.0.0.0', port=int(os.environ.get('PORT', '8080')), debug=True)
 

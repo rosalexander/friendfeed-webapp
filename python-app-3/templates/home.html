@@ -1,0 +1,32 @@
+{% extends 'layout.html' %}
+
+{% block body %}
+	<div class="jumbotron text-center">
+		<h1>Welcome to Friendfeed</h1>
+		<p class="lead">The fastest growing social media site</p>
+		{% if session.logged_in %}
+
+			<h3>You are logged in as {{session.username}}</h3>
+		{% else %}
+			<a href="/register" class="btn btn-primary">Register</a>
+			<a href="/login" class="btn btn-success">Login</a>
+		{% endif %}
+	</div>
+	<hr>
+	<div>
+	{% for article in articles %}
+		<li class="list-group-item">
+
+			<a href="articles/{{article.id}}"><h2>{{article.title}}</h2></a>
+			<small>Written by {{article.author}} on {{article.create_date}} </small>
+			<hr>
+			<div>
+				{{article.body | safe}}
+			</div>
+
+		</li>
+	{% endfor %}
+	<p>{{msg}}</p>
+	</div>
+
+{% endblock %}
