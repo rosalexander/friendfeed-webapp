@@ -1,0 +1,12 @@
+{% extends 'layout.html' %}
+
+{% block body %}
+	{% for image in images %}
+
+		<li class="list-group-item">
+			<img  src="{{url_for('get_img', ref=image.name)}}" style="width:300px;height:300px;>
+		</li>
+	{% endfor %}
+{% endblock %}
+
+<p>{{msg}}</p>
